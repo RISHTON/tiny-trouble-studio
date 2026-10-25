@@ -6,166 +6,226 @@ from PIL import Image, ImageDraw, ImageFont
 
 W, H = 720, 1280
 FPS = 15
-SECONDS = 30
+SECONDS = 36
 TOTAL = FPS * SECONDS
 
 os.makedirs("frames", exist_ok=True)
 
+FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
 try:
-    FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-    font_big = ImageFont.truetype(FONT, 58)
-    font_mid = ImageFont.truetype(FONT, 36)
+    BIG = ImageFont.truetype(FONT_PATH, 58)
+    MID = ImageFont.truetype(FONT_PATH, 38)
+    SMALL = ImageFont.truetype(FONT_PATH, 28)
 except OSError:
-    font_big = ImageFont.load_default()
-    font_mid = ImageFont.load_default()
+    BIG = MID = SMALL = ImageFont.load_default()
 
 
-def centered(draw, text, y, font, fill):
-    box = draw.textbbox((0, 0), text, font=font)
-    x = (W - (box[2] - box[0])) // 2
-    draw.text((x, y), text, font=font, fill=fill)
+def text_center(d, text, y, font, color="#34254F"):
+    b = d.textbbox((0, 0), text, font=font)
+    x = (W - (b[2] - b[0])) // 2
+    d.text((x, y), text, font=font, fill=color,
+           stroke_width=0)
 
 
-def make_frame(frame_number):
-    t = frame_number / FPS
+def rounded(d, box, fill, radius=24, outline=None, width=3):
+    d.rounded_rectangle(
+        box, radius=radius, fill=fill,
+        outline=outline, width=width
+    )
+
+
+def character(d, x, y, t, mood="sneaky", scale=1.0):
+    bob = math.sin(t * 7) * 6
+    x = int(x)
+    y = int(y + bob)
+
+    # Shadow
+    d.ellipse((x-65, y+225, x+65, y+245),
+              fill="#B98A69")
+
+    # Legs
+    stride = math.sin(t * 8) * 18
+    d.line((x-22, y+175, x-30+stride, y+225),
+           fill="#27315D", width=20)
+    d.line((x+22, y+175, x+30-stride, y+225),
+           fill="#27315D", width=20)
+
+    # Shoes
+    d.ellipse((x-55+stride, y+213, x-15+stride, y+232),
+              fill="#29253B")
+    d.ellipse((x+15-stride, y+213, x+55-stride, y+232),
+              fill="#29253B")
+
+    # Body
+    rounded(d, (x-48, y+85, x+48, y+185),
+            "#6268DC", 28)
+
+    # Arms change with the action
+    if mood == "reach":
+        d.line((x+30, y+112, x+95, y+75),
+               fill="#FFD0A1", width=22)
+        d.ellipse((x+82, y+61, x+108, y+87),
+                  fill="#FFD0A1")
+        d.line((x-30, y+115, x-55, y+150),
+               fill="#FFD0A1", width=20)
+    elif mood == "panic":
+        d.line((x-30, y+112, x-75, y+72),
+               fill="#FFD0A1", width=22)
+        d.line((x+30, y+112, x+75, y+72),
+               fill="#FFD0A1", width=22)
+    else:
+        d.line((x-30, y+112, x-55, y+145),
+               fill="#FFD0A1", width=20)
+        d.line((x+30, y+112, x+55, y+145),
+               fill="#FFD0A1", width=20)
+
+    # Head
+    d.ellipse((x-58, y-5, x+58, y+112),
+              fill="#FFD0A1", outline="#7C4A35", width=4)
+
+    # Hair
+    d.pieslice((x-61, y-15, x+61, y+65),
+               180, 355, fill="#503321")
+
+    # Eyebrows and eyes
+    if mood == "panic":
+        eye_y = y+42
+        d.ellipse((x-32, eye_y-7, x-8, eye_y+23),
+                  fill="white")
+        d.ellipse((x+8, eye_y-7, x+32, eye_y+23),
+                  fill="white")
+        d.ellipse((x-23, eye_y+2, x-13, eye_y+16),
+                  fill="#252525")
+        d.ellipse((x+13, eye_y+2, x+23, eye_y+16),
+                  fill="#252525")
+        d.line((x-32, y+25, x-8, y+20),
+               fill="#503321", width=5)
+        d.line((x+8, y+20, x+32, y+25),
+               fill="#503321", width=5)
+        d.ellipse((x-12, y+72, x+12, y+98),
+                  fill="#7B3028")
+    elif mood == "proud":
+        d.ellipse((x-30, y+37, x-10, y+58),
+                  fill="#252525")
+        d.ellipse((x+10, y+37, x+30, y+58),
+                  fill="#252525")
+        d.arc((x-20, y+48, x+22, y+88),
+              10, 165, fill="#8D4534", width=5)
+    else:
+        d.ellipse((x-30, y+35, x-10, y+58),
+                  fill="white")
+        d.ellipse((x+10, y+35, x+30, y+58),
+                  fill="white")
+        d.ellipse((x-24, y+42, x-13, y+55),
+                  fill="#252525")
+        d.ellipse((x+13, y+42, x+24, y+55),
+                  fill="#252525")
+        d.arc((x-15, y+65, x+18, y+88),
+              15, 155, fill="#8D4534", width=4)
+
+
+def cookie(d, x, y, size=42):
+    d.ellipse((x-size, y-size, x+size, y+size),
+              fill="#C98342", outline="#8D4E24", width=4)
+    for dx, dy in [(-15, -12), (12, -18), (5, 8),
+                   (-20, 15), (22, 16)]:
+        d.ellipse((x+dx-5, y+dy-5, x+dx+5, y+dy+5),
+                  fill="#62351E")
+
+
+def make_frame(i):
+    t = i / FPS
     im = Image.new("RGB", (W, H), "#A9E5FF")
     d = ImageDraw.Draw(im)
 
-    # Room and floor
-    d.rectangle((0, 700, W, 1000), fill="#F7DDB2")
-    d.rectangle((0, 1000, W, H), fill="#B8794D")
+    # Background changes between scenes
+    if t < 9:
+        sky, floor = "#A9E5FF", "#B8794D"
+    elif t < 18:
+        sky, floor = "#FFE4A8", "#B8794D"
+    elif t < 27:
+        sky, floor = "#F8C7D8", "#8C6BC4"
+    else:
+        sky, floor = "#B8E8C5", "#B8794D"
 
-    # Window
-    d.rounded_rectangle(
-        (55, 180, 300, 510), radius=18,
-        fill="#FFF4CE", outline="#FFFFFF", width=12
-    )
-    d.rectangle((170, 190, 183, 500), fill="#FFFFFF")
-    d.rectangle((65, 335, 290, 348), fill="#FFFFFF")
+    d.rectangle((0, 0, W, H), fill=sky)
+    d.rectangle((0, 900, W, H), fill=floor)
+
+    # Room window
+    rounded(d, (45, 160, 290, 465), "#FFF5D6", 20,
+            "#FFFFFF", 10)
+    d.line((167, 170, 167, 455), fill="#FFFFFF", width=10)
+    d.line((55, 310, 280, 310), fill="#FFFFFF", width=10)
 
     # Table
-    d.rounded_rectangle(
-        (365, 750, 665, 790), radius=12, fill="#8A4F2D"
-    )
-    d.rectangle((395, 780, 420, 960), fill="#704024")
-    d.rectangle((610, 780, 635, 960), fill="#704024")
+    rounded(d, (350, 725, 675, 775), "#8A4F2D", 12)
+    d.rectangle((380, 765, 405, 1000), fill="#704024")
+    d.rectangle((620, 765, 645, 1000), fill="#704024")
 
-    # Cookie and plate
-    cookie_gone = t >= 21
-    cookie_x = 520
-    d.ellipse((435, 735, 600, 775), fill="#F4F0E8")
-    if not cookie_gone:
-        d.ellipse(
-            (cookie_x - 42, 680, cookie_x + 42, 752),
-            fill="#C98342", outline="#8D4E24", width=5
-        )
-        for dx, dy in [(-18, 12), (12, 4), (0, 32), (22, 42), (-23, 43)]:
-            d.ellipse(
-                (cookie_x + dx - 6, 712 + dy - 6,
-                 cookie_x + dx + 6, 712 + dy + 6),
-                fill="#62351E"
-            )
+    # Plate
+    d.ellipse((420, 705, 610, 755), fill="#FFFFFF")
+    d.ellipse((440, 711, 590, 748), fill="#E8E2D9")
+
+    # Four scenes
+    if t < 9:
+        caption = "OPERATION: COOKIE"
+        x = 130 + int(min(t / 9, 1) * 120)
+        mood = "sneaky"
+        character(d, x, 700, t, mood)
+        cookie(d, 520, 690)
+        if 5 < t < 8:
+            text_center(d, "SHHH...", 540, MID)
+
+    elif t < 18:
+        caption = "JUST ONE BITE!"
+        x = 300 + int(math.sin(t * 2) * 15)
+        character(d, x, 700, t, "reach")
+        cookie(d, 520, 690)
+        if t > 14:
+            text_center(d, "ALMOST...", 535, MID)
+
+    elif t < 27:
+        caption = "UH-OH!"
+        x = 475
+        character(d, x, 700, t, "panic")
+        # Flying cookie crumbs
+        for k in range(12):
+            cx = int(520 + math.sin(t*4+k)*95)
+            cy = int(670 + math.cos(t*5+k)*65)
+            d.ellipse((cx-6, cy-6, cx+6, cy+6),
+                      fill="#C98342")
+        if t > 22:
+            rounded(d, (95, 1010, 625, 1160), "#FFFFFF")
+            text_center(d, "WHO ATE THE COOKIE?", 1055, SMALL)
+
     else:
-        for dx, dy in [(-25, 0), (10, -8), (30, 8), (-5, 12)]:
-            d.ellipse(
-                (cookie_x + dx, 750 + dy,
-                 cookie_x + dx + 12, 762 + dy),
-                fill="#C98342"
-            )
+        caption = "CASE CLOSED?"
+        character(d, 470, 700, t, "proud")
+        # Crumbs on the face
+        for cx, cy in [(451, 770), (490, 780), (475, 800)]:
+            d.ellipse((cx, cy, cx+9, cy+9), fill="#C98342")
+        # Empty plate
+        d.ellipse((420, 705, 610, 755), fill="#FFFFFF")
+        d.ellipse((440, 711, 590, 748), fill="#E8E2D9")
+        rounded(d, (85, 1000, 635, 1185), "#FFFFFF")
+        text_center(d, "CASE CLOSED", 1020, MID)
+        text_center(d, "I SAW NOTHING!", 1075, SMALL)
+        if t > 33:
+            text_center(d, "FOLLOW FOR MORE!", 1140, SMALL)
 
-    # Sneaking character
-    progress = min(max((t - 3) / 17, 0), 1)
-    x = int(115 + progress * 300)
-    bob = int(math.sin(t * 5) * 7)
+    # Scene caption
+    rounded(d, (35, 45, 685, 125), "#FFFFFF", 22)
+    text_center(d, caption, 62, MID)
 
-    # Shadow
-    d.ellipse((x - 60, 940, x + 65, 965), fill="#A56B49")
-
-    # Body
-    d.rounded_rectangle(
-        (x - 48, 815 + bob, x + 48, 935 + bob),
-        radius=28, fill="#5D66D8"
-    )
-
-    # Legs
-    d.line(
-        (x - 20, 925 + bob, x - 35, 960),
-        fill="#25305C", width=19
-    )
-    d.line(
-        (x + 20, 925 + bob, x + 35, 960),
-        fill="#25305C", width=19
-    )
-
-    # Head
-    d.ellipse(
-        (x - 58, 710 + bob, x + 58, 830 + bob),
-        fill="#FFD0A1", outline="#7C4A35", width=4
-    )
-
-    # Hair
-    d.arc(
-        (x - 58, 700 + bob, x + 58, 790 + bob),
-        180, 350, fill="#513321", width=20
-    )
-
-    # Eyes
-    eye_y = 765 + bob
-    d.ellipse((x - 30, eye_y, x - 12, eye_y + 22), fill="#252525")
-    d.ellipse((x + 12, eye_y, x + 30, eye_y + 22), fill="#252525")
-
-    # Expression
-    if t < 20:
-        d.arc(
-            (x - 15, 780 + bob, x + 18, 807 + bob),
-            15, 150, fill="#8D4534", width=4
-        )
-    else:
-        d.ellipse(
-            (x - 13, 785 + bob, x + 13, 809 + bob),
-            fill="#7B3028"
-        )
-
-    # Arms reaching for cookie
-    if 12 <= t < 22:
-        d.line(
-            (x + 35, 845 + bob, x + 100, 810),
-            fill="#FFD0A1", width=22
-        )
-        d.ellipse((x + 88, 797, x + 112, 822), fill="#FFD0A1")
-    else:
-        d.line(
-            (x + 35, 845 + bob, x + 65, 880),
-            fill="#FFD0A1", width=22
-        )
-
-    # Story captions
-    if t < 4:
-        d.rounded_rectangle(
-            (45, 55, 675, 155), radius=25, fill="#FFFFFF"
-        )
-        centered(d, "THE COOKIE HEIST", 77, font_mid, "#34254F")
-    elif 4 <= t < 12:
-        centered(d, "ACT NATURAL...", 85, font_mid, "#34254F")
-    elif 12 <= t < 20:
-        centered(d, "JUST ONE COOKIE!", 85, font_mid, "#34254F")
-    elif 20 <= t < 25:
-        centered(d, "UH-OH!", 85, font_big, "#B92D3D")
-    else:
-        d.rounded_rectangle(
-            (55, 1050, 665, 1195), radius=28, fill="#FFFFFF"
-        )
-        centered(d, "MISSION", 1065, font_mid, "#34254F")
-        centered(d, "ACCOMPLISHED?", 1110, font_mid, "#D34B36")
-
-    im.save(f"frames/frame_{frame_number:04d}.png")
+    im.save(f"frames/frame_{i:04d}.png")
 
 
-print("Drawing cartoon frames...")
+print("Drawing improved cartoon...")
 for i in range(TOTAL):
     make_frame(i)
 
-print("Making vertical MP4...")
+print("Creating MP4...")
 subprocess.run([
     "ffmpeg", "-y",
     "-framerate", str(FPS),
@@ -181,4 +241,4 @@ subprocess.run([
     "tiny_trouble_short.mp4"
 ], check=True)
 
-print("SUCCESS: tiny_trouble_short.mp4 created!")
+print("SUCCESS: improved 36-second cartoon created!")
