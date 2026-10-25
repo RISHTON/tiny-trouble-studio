@@ -1,591 +1,324 @@
 
-import os
 import math
+import os
+import random
+import struct
 import subprocess
-from PIL import Image, ImageDraw, ImageFont
+import wave
+
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 W, H = 720, 1280
-FPS = 15
-SECONDS = 36
+FPS = 24
+SECONDS = 15
 TOTAL = FPS * SECONDS
+AUDIO_RATE = 44100
+
+CHARACTER_FILE = "Image.webp"
+OUTPUT_FILE = "tiny_trouble_short.mp4"
 
 os.makedirs("frames", exist_ok=True)
 
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 try:
-    BIG = ImageFont.truetype(FONT_PATH, 58)
-    MID = ImageFont.truetype(FONT_PATH, 38)
-    SMALL = ImageFont.truetype(FONT_PATH, 28)
+    BIG = ImageFont.truetype(FONT_PATH, 48)
+    MID = ImageFont.truetype(FONT_PATH, 34)
 except OSError:
-    BIG = MID = SMALL = ImageFont.load_default()
+    BIG = MID = ImageFont.load_default()
+
+if not os.path.exists(CHARACTER_FILE):
+    raise FileNotFoundError(
+        "Image.webp not found. Put it beside render.py."
+    )
+
+character_original = Image.open(CHARACTER_FILE).convert("RGBA")
+character_original.thumbnail((410, 650), Image.Resampling.LANCZOS)
 
 
-def text_center(d, text, y, font, color="#34254F"):
-    box = d.textbbox((0, 0), text, font=font)
+def centered_text(draw, text, y, font, fill="#FFFFFF"):
+    box = draw.textbbox((0, 0), text, font=font)
     x = (W - (box[2] - box[0])) // 2
-    d.text((x, y), text, font=font, fill=color)
+    draw.text((x + 3, y + 4), text, font=font, fill="#392A35")
+    draw.text((x, y), text, font=font, fill=fill)
 
 
-def rounded(d, box, fill, radius=24, outline=None, width=3):
+def background(t):
+    im = Image.new("RGB", (W, H))
+    px = im.load()
+
+    for y in range(H):
+        if y < 850:
+            c = int(242 - y * 0.025)
+            color = (c, int(c * 0.84), int(c * 0.68))
+        else:
+            color = (158, 99, 62)
+
+        for x in range(W):
+            px[x, y] = color
+
+    d = ImageDraw.Draw(im, "RGBA")
+
+    # Warm window light
     d.rounded_rectangle(
-        box,
-        radius=radius,
-        fill=fill,
-        outline=outline,
-        width=width
+        (45, 130, 270, 460),
+        radius=24,
+        fill=(255, 245, 205, 255)
     )
-
-
-def cookie(d, x, y, size=42):
+    d.rectangle(
+        (62, 147, 253, 443),
+        fill=(123, 201, 230, 255)
+    )
     d.ellipse(
-        (x-size, y-size, x+size, y+size),
-        fill="#C98342",
-        outline="#8D4E24",
+        (185, 180, 240, 235),
+        fill=(255, 220, 112, 255)
+    )
+    d.line((158, 150, 158, 440), fill="white", width=9)
+    d.line((62, 295, 253, 295), fill="white", width=9)
+
+    # Floor boards
+    for y in range(920, H, 85):
+        d.line((0, y, W, y), fill=(100, 55, 36, 100), width=3)
+
+    # Table
+    d.rounded_rectangle(
+        (325, 745, 690, 805),
+        radius=18,
+        fill="#764326"
+    )
+    d.rectangle((360, 790, 390, 1050), fill="#603820")
+    d.rectangle((630, 790, 660, 1050), fill="#603820")
+
+    # Cookie plate
+    d.ellipse((390, 710, 630, 780), fill="#F8F3E9")
+    d.ellipse((408, 718, 612, 770), fill="#DAD4CA")
+
+    # Cookie
+    cookie_x = int(500 + 12 * math.sin(t * 2))
+    cookie_y = int(718 + 4 * math.sin(t * 3))
+    d.ellipse(
+        (cookie_x - 37, cookie_y - 24,
+         cookie_x + 37, cookie_y + 24),
+        fill="#C98242",
+        outline="#8B4A25",
         width=4
     )
 
-    for dx, dy in [
-        (-15, -12), (12, -18), (5, 8),
-        (-20, 15), (22, 16)
-    ]:
+    for dx, dy in [(-17, -8), (9, -13), (15, 8), (-5, 10)]:
         d.ellipse(
-            (x+dx-5, y+dy-5, x+dx+5, y+dy+5),
-            fill="#62351E"
+            (cookie_x + dx - 4, cookie_y + dy - 4,
+             cookie_x + dx + 4, cookie_y + dy + 4),
+            fill="#58321F"
         )
 
+    # Soft foreground vignette
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    od.rectangle((0, 0, W, 18), fill=(50, 28, 35, 45))
+    return Image.alpha_composite(im.convert("RGBA"), overlay)
 
-def character(d, x, y, t, mood="sneaky"):
-    bob = math.sin(t * 7) * 6
-    x = int(x)
-    y = int(y + bob)
 
-    # Character shadow
-    d.ellipse(
-        (x-65, y+225, x+65, y+245),
-        fill="#986541"
-    )
-
-    # Moving legs
-    stride = math.sin(t * 8) * 18
-
-    d.line(
-        (x-22, y+175, x-30+stride, y+225),
-        fill="#27315D",
-        width=20
-    )
-
-    d.line(
-        (x+22, y+175, x+30-stride, y+225),
-        fill="#27315D",
-        width=20
-    )
-
-    # Shoes
-    d.ellipse(
-        (x-55+stride, y+213, x-15+stride, y+232),
-        fill="#29253B"
-    )
-
-    d.ellipse(
-        (x+15-stride, y+213, x+55-stride, y+232),
-        fill="#29253B"
-    )
-
-    # Body
-    rounded(
-        d,
-        (x-48, y+85, x+48, y+185),
-        "#6268DC",
-        28
-    )
-
-    # Arms
-    if mood == "reach":
-        d.line(
-            (x+30, y+112, x+95, y+75),
-            fill="#FFD0A1",
-            width=22
-        )
-
-        d.ellipse(
-            (x+82, y+61, x+108, y+87),
-            fill="#FFD0A1"
-        )
-
-        d.line(
-            (x-30, y+115, x-55, y+150),
-            fill="#FFD0A1",
-            width=20
-        )
-
-    elif mood == "panic":
-        d.line(
-            (x-30, y+112, x-75, y+72),
-            fill="#FFD0A1",
-            width=22
-        )
-
-        d.line(
-            (x+30, y+112, x+75, y+72),
-            fill="#FFD0A1",
-            width=22
-        )
-
+def add_character(im, t):
+    # Character moves into the scene and reacts.
+    if t < 3:
+        progress = t / 3
+        x = int(-100 + progress * 160)
+        scale = 0.86 + progress * 0.10
+        bob = math.sin(t * 9) * 5
+    elif t < 6:
+        x = int(60 + (t - 3) * 24)
+        scale = 0.96 + 0.03 * math.sin(t * 4)
+        bob = math.sin(t * 10) * 7
+    elif t < 10:
+        x = int(130 + 35 * math.sin((t - 6) * 3))
+        scale = 1.0 + 0.04 * math.sin(t * 8)
+        bob = math.sin(t * 15) * 12
     else:
-        d.line(
-            (x-30, y+112, x-55, y+145),
-            fill="#FFD0A1",
-            width=20
+        x = int(130 + 10 * math.sin(t * 2))
+        scale = 1.0 + 0.02 * math.sin(t * 5)
+        bob = math.sin(t * 4) * 3
+
+    w = max(1, int(character_original.width * scale))
+    h = max(1, int(character_original.height * scale))
+    sprite = character_original.resize(
+        (w, h), Image.Resampling.LANCZOS
+    )
+
+    # A little rotation makes the movement less static.
+    angle = 0
+    if 6 < t < 10:
+        angle = math.sin(t * 13) * 5
+        sprite = sprite.rotate(
+            angle, resample=Image.Resampling.BICUBIC, expand=True
         )
 
-        d.line(
-            (x+30, y+112, x+55, y+145),
-            fill="#FFD0A1",
-            width=20
-        )
+    y = int(440 + bob + (1 - scale) * 120)
 
-    # Head
-    d.ellipse(
-        (x-58, y-5, x+58, y+112),
-        fill="#FFD0A1",
-        outline="#7C4A35",
-        width=4
-    )
-
-    # Hair
-    d.pieslice(
-        (x-61, y-15, x+61, y+65),
-        180,
-        355,
-        fill="#503321"
-    )
-
-    # Facial expressions
-    if mood == "panic":
-        eye_y = y + 42
-
-        d.ellipse(
-            (x-32, eye_y-7, x-8, eye_y+23),
-            fill="white"
-        )
-
-        d.ellipse(
-            (x+8, eye_y-7, x+32, eye_y+23),
-            fill="white"
-        )
-
-        d.ellipse(
-            (x-23, eye_y+2, x-13, eye_y+16),
-            fill="#252525"
-        )
-
-        d.ellipse(
-            (x+13, eye_y+2, x+23, eye_y+16),
-            fill="#252525"
-        )
-
-        d.line(
-            (x-32, y+25, x-8, y+20),
-            fill="#503321",
-            width=5
-        )
-
-        d.line(
-            (x+8, y+20, x+32, y+25),
-            fill="#503321",
-            width=5
-        )
-
-        d.ellipse(
-            (x-12, y+72, x+12, y+98),
-            fill="#7B3028"
-        )
-
-    elif mood == "proud":
-        d.ellipse(
-            (x-30, y+37, x-10, y+58),
-            fill="#252525"
-        )
-
-        d.ellipse(
-            (x+10, y+37, x+30, y+58),
-            fill="#252525"
-        )
-
-        d.arc(
-            (x-20, y+48, x+22, y+88),
-            10,
-            165,
-            fill="#8D4534",
-            width=5
-        )
-
-    else:
-        d.ellipse(
-            (x-30, y+35, x-10, y+58),
-            fill="white"
-        )
-
-        d.ellipse(
-            (x+10, y+35, x+30, y+58),
-            fill="white"
-        )
-
-        d.ellipse(
-            (x-24, y+42, x-13, y+55),
-            fill="#252525"
-        )
-
-        d.ellipse(
-            (x+13, y+42, x+24, y+55),
-            fill="#252525"
-        )
-
-        d.arc(
-            (x-15, y+65, x+18, y+88),
-            15,
-            155,
-            fill="#8D4534",
-            width=4
-        )
-
-
-def draw_room(d):
-    # Permanent walls
-    d.rectangle((0, 0, W, 900), fill="#F2D8B5")
-
-    # Wall panels
-    for px in range(25, W, 115):
-        d.line(
-            (px, 0, px, 900),
-            fill="#E5C49D",
-            width=3
-        )
-
-    # Window
-    rounded(
-        d,
-        (45, 135, 290, 455),
-        "#FFF5D6",
-        12
-    )
-
-    d.rectangle(
-        (60, 150, 275, 440),
-        fill="#9EDDF4"
-    )
-
-    # Sun outside
-    d.ellipse(
-        (205, 175, 250, 220),
-        fill="#FFE38A"
-    )
-
-    # Window frame
-    d.line(
-        (167, 150, 167, 440),
-        fill="#FFFFFF",
-        width=9
-    )
-
-    d.line(
-        (60, 295, 275, 295),
-        fill="#FFFFFF",
-        width=9
-    )
-
-    # Curtains
-    d.polygon(
-        [(45, 135), (100, 135), (85, 440), (45, 455)],
-        fill="#C95D5D"
-    )
-
-    d.polygon(
-        [(235, 135), (290, 135), (290, 455), (250, 440)],
-        fill="#C95D5D"
-    )
-
-    # Wall clock
-    d.ellipse(
-        (535, 145, 635, 245),
-        fill="#FFF8E7",
-        outline="#7B533C",
-        width=7
-    )
-
-    d.line(
-        (585, 195, 585, 165),
-        fill="#513321",
-        width=5
-    )
-
-    d.line(
-        (585, 195, 610, 210),
-        fill="#513321",
-        width=5
-    )
-
-    # Picture
-    rounded(
-        d,
-        (390, 270, 520, 390),
-        "#8A4F2D",
-        8
-    )
-
-    d.rectangle(
-        (402, 282, 508, 378),
-        fill="#B9DFA7"
-    )
-
-    d.ellipse(
-        (425, 300, 485, 360),
-        fill="#F8D57E"
-    )
-
-    # Floor
-    d.rectangle(
-        (0, 900, W, 920),
-        fill="#FFFFFF"
-    )
-
-    d.rectangle(
-        (0, 920, W, H),
-        fill="#B8794D"
-    )
-
-    for fy in range(960, H, 90):
-        d.line(
-            (0, fy, W, fy),
-            fill="#995E3B",
-            width=3
-        )
-
-    for fx in range(70, W, 160):
-        d.line(
-            (fx, 920, fx-50, H),
-            fill="#995E3B",
-            width=2
-        )
-
-    # Plant and pot
-    d.rectangle(
-        (65, 785, 140, 850),
-        fill="#B85F43"
-    )
-
-    d.line(
-        (102, 790, 102, 700),
-        fill="#447C48",
-        width=8
-    )
-
-    d.ellipse(
-        (65, 700, 105, 745),
-        fill="#4E9C59"
-    )
-
-    d.ellipse(
-        (100, 675, 145, 720),
-        fill="#5EAA60"
-    )
-
-    d.ellipse(
-        (85, 735, 130, 775),
-        fill="#3E8549"
-    )
+    # If the source image has transparency, its edges blend into the scene.
+    im.alpha_composite(sprite, (x, y))
 
 
 def make_frame(i):
     t = i / FPS
+    im = background(t)
 
-    # Same room background in every scene
-    im = Image.new("RGB", (W, H), "#F2D8B5")
-    d = ImageDraw.Draw(im)
+    # Slight camera zoom at the surprise moment.
+    if 6.0 <= t <= 8.5:
+        zoom = 1.0 + 0.055 * math.sin(
+            math.pi * (t - 6.0) / 2.5
+        )
+        nw, nh = int(W * zoom), int(H * zoom)
+        im = im.resize((nw, nh), Image.Resampling.LANCZOS)
+        left = (nw - W) // 2
+        top = (nh - H) // 2
+        im = im.crop((left, top, left + W, top + H))
 
-    draw_room(d)
+    add_character(im, t)
+    d = ImageDraw.Draw(im, "RGBA")
 
-    # Table
-    rounded(
-        d,
-        (350, 725, 675, 775),
-        "#8A4F2D",
-        12
-    )
+    # Small flying crumbs during the accident.
+    if 7 <= t <= 10:
+        random.seed(42)
+        for k in range(18):
+            phase = (t - 7) * 90 + k * 23
+            cx = int(500 + math.sin(phase) * (35 + k * 2))
+            cy = int(700 + math.cos(phase * 0.7) * (20 + k * 2))
+            r = 3 + k % 4
+            d.ellipse(
+                (cx-r, cy-r, cx+r, cy+r),
+                fill=(201, 130, 66, 240)
+            )
 
-    d.rectangle(
-        (380, 765, 405, 1000),
-        fill="#704024"
-    )
-
-    d.rectangle(
-        (620, 765, 645, 1000),
-        fill="#704024"
-    )
-
-    # Plate
-    d.ellipse(
-        (420, 705, 610, 755),
-        fill="#FFFFFF"
-    )
-
-    d.ellipse(
-        (440, 711, 590, 748),
-        fill="#E8E2D9"
-    )
-
-    # Scene 1: Sneaking
-    if t < 9:
+    if t < 3:
         caption = "OPERATION: COOKIE"
-
-        x = 130 + int(t * 12)
-        character(d, x, 700, t, "sneaky")
-        cookie(d, 520, 690)
-
-        if 5 < t < 8:
-            text_center(d, "SHHH...", 540, MID)
-
-    # Scene 2: Reaching
-    elif t < 18:
-        caption = "JUST ONE BITE!"
-
-        character(d, 330, 700, t, "reach")
-        cookie(d, 520, 690)
-
-        if t > 14:
-            text_center(d, "ALMOST...", 535, MID)
-
-    # Scene 3: Panic and crumbs
-    elif t < 27:
-        caption = "UH-OH!"
-
-        character(d, 475, 700, t, "panic")
-
-        for k in range(12):
-            cx = int(520 + math.sin(t*4+k)*95)
-            cy = int(670 + math.cos(t*5+k)*65)
-
-            d.ellipse(
-                (cx-6, cy-6, cx+6, cy+6),
-                fill="#C98342"
-            )
-
-        if t > 22:
-            rounded(
-                d,
-                (95, 1010, 625, 1160),
-                "#FFFFFF"
-            )
-
-            text_center(
-                d,
-                "WHO ATE THE COOKIE?",
-                1055,
-                SMALL
-            )
-
-    # Scene 4: Comedy ending
+    elif t < 6:
+        caption = "JUST ONE BITE..."
+    elif t < 8:
+        caption = "OH NO!"
+    elif t < 11:
+        caption = "ACT NATURAL"
     else:
-        caption = "CASE CLOSED?"
+        caption = "I SAW NOTHING!"
 
-        character(d, 470, 700, t, "proud")
+    d.rounded_rectangle(
+        (30, 42, 690, 116),
+        radius=22,
+        fill=(35, 27, 39, 220)
+    )
+    centered_text(d, caption, 57, MID)
 
-        # Crumbs on character's face
-        for cx, cy in [
-            (451, 770),
-            (490, 780),
-            (475, 800)
-        ]:
-            d.ellipse(
-                (cx, cy, cx+9, cy+9),
-                fill="#C98342"
-            )
+    # Reaction burst
+    if 6.5 < t < 8.0:
+        centered_text(d, "?!", 220, BIG, "#FFE58B")
 
-        # Empty plate
-        d.ellipse(
-            (420, 705, 610, 755),
-            fill="#FFFFFF"
-        )
-
-        d.ellipse(
-            (440, 711, 590, 748),
-            fill="#E8E2D9"
-        )
-
-        rounded(
-            d,
-            (85, 1000, 635, 1185),
-            "#FFFFFF"
-        )
-
-        text_center(
-            d,
-            "CASE CLOSED",
-            1020,
-            MID
-        )
-
-        text_center(
-            d,
-            "I SAW NOTHING!",
-            1075,
-            SMALL
-        )
-
-        if t > 33:
-            text_center(
-                d,
-                "FOLLOW FOR MORE!",
-                1140,
-                SMALL
-            )
-
-    # Caption banner
-    rounded(
-        d,
-        (35, 45, 685, 125),
-        "#FFFFFF",
-        22
+    im.convert("RGB").save(
+        f"frames/frame_{i:04d}.jpg",
+        quality=94
     )
 
-    text_center(
-        d,
-        caption,
-        62,
-        MID
-    )
 
-    im.save(
-        f"frames/frame_{i:04d}.png"
-    )
+def make_audio():
+    random.seed(7)
+    total = AUDIO_RATE * SECONDS
+
+    # Build a playful original tune and timed sound effects.
+    with wave.open("soundtrack.wav", "wb") as wf:
+        wf.setnchannels(2)
+        wf.setsampwidth(2)
+        wf.setframerate(AUDIO_RATE)
+
+        chunk = 4096
+        for start in range(0, total, chunk):
+            data = bytearray()
+
+            for n in range(start, min(start + chunk, total)):
+                t = n / AUDIO_RATE
+                music = 0.0
+
+                # Light playful plucked melody.
+                if t < 15:
+                    beat = int(t / 0.24)
+                    notes = [523, 659, 784, 659, 587, 698, 880, 698]
+                    freq = notes[beat % len(notes)]
+                    local = t % 0.24
+                    env = math.exp(-local * 7)
+                    music += 0.14 * env * math.sin(
+                        2 * math.pi * freq * t
+                    )
+                    music += 0.045 * env * math.sin(
+                        2 * math.pi * freq * 2 * t
+                    )
+
+                # Sneaky footsteps at 1.0 and 2.0 seconds.
+                for onset in (1.0, 2.0, 4.0, 4.45):
+                    dt = t - onset
+                    if 0 <= dt < 0.12:
+                        music += 0.20 * math.exp(-dt * 30) * math.sin(
+                            2 * math.pi * (100 - 250 * dt) * dt
+                        )
+
+                # Comedic whoosh at the reach.
+                dt = t - 5.7
+                if 0 <= dt < 0.65:
+                    noise = random.uniform(-1, 1)
+                    music += noise * 0.12 * math.sin(
+                        math.pi * dt / 0.65
+                    )
+
+                # Boing at the surprise.
+                dt = t - 7.0
+                if 0 <= dt < 0.6:
+                    freq = 180 + 420 * math.exp(-dt * 5)
+                    music += 0.28 * math.exp(-dt * 4) * math.sin(
+                        2 * math.pi * freq * dt
+                    )
+
+                # Cookie crunch at 9.0 seconds.
+                dt = t - 9.0
+                if 0 <= dt < 0.22:
+                    music += random.uniform(-0.22, 0.22) * math.exp(-dt * 8)
+
+                # Tiny comic sting at the ending.
+                dt = t - 11.7
+                if 0 <= dt < 0.45:
+                    music += 0.16 * math.exp(-dt * 5) * math.sin(
+                        2 * math.pi * 880 * dt
+                    )
+
+                sample = max(-0.95, min(0.95, music))
+                value = int(sample * 32767)
+                data.extend(struct.pack("<hh", value, value))
+
+            wf.writeframes(data)
 
 
 def main():
-    print("Drawing improved cartoon...")
+    print("Rendering 15-second cartoon...")
 
     for i in range(TOTAL):
         make_frame(i)
 
-    print("Creating vertical MP4...")
+    print("Creating music and sound effects...")
+    make_audio()
 
+    print("Combining video and audio with FFmpeg...")
     subprocess.run([
-        "ffmpeg",
-        "-y",
+        "ffmpeg", "-y",
         "-framerate", str(FPS),
-        "-i", "frames/frame_%04d.png",
-        "-f", "lavfi",
-        "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-i", "frames/frame_%04d.jpg",
+        "-i", "soundtrack.wav",
         "-t", str(SECONDS),
         "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "19",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
-        "-shortest",
+        "-b:a", "192k",
         "-movflags", "+faststart",
-        "tiny_trouble_short.mp4"
+        OUTPUT_FILE
     ], check=True)
 
-    print("SUCCESS: improved cartoon created!")
+    print("DONE:", OUTPUT_FILE)
 
 
 if __name__ == "__main__":
