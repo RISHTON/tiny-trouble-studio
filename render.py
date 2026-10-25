@@ -14,7 +14,7 @@ SECONDS = 15
 TOTAL = FPS * SECONDS
 AUDIO_RATE = 44100
 
-CHARACTER_FILE = "Image.webp"
+CHARACTER_FILE = "image.webp"
 OUTPUT_FILE = "tiny_trouble_short.mp4"
 
 os.makedirs("frames", exist_ok=True)
